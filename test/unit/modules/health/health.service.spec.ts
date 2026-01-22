@@ -66,7 +66,10 @@ describe('HealthService', () => {
 
       expect(result).toHaveProperty('status', 'ok');
       expect(result).toHaveProperty('database', 'connected');
-      expect(result).toHaveProperty('message', 'Successfully connected to Supabase');
+      expect(result).toHaveProperty(
+        'message',
+        'Successfully connected to Supabase',
+      );
       expect(result).toHaveProperty('timestamp');
       expect(supabaseService.getClient).toHaveBeenCalled();
     });
@@ -101,7 +104,9 @@ describe('HealthService', () => {
 
     it('should return error status when exception is thrown', async () => {
       const errorMessage = 'Network error';
-      mockSupabaseClient.auth.getSession.mockRejectedValue(new Error(errorMessage));
+      mockSupabaseClient.auth.getSession.mockRejectedValue(
+        new Error(errorMessage),
+      );
 
       const result = await service.checkDatabase();
 
@@ -111,4 +116,3 @@ describe('HealthService', () => {
     });
   });
 });
-
