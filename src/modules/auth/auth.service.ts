@@ -232,5 +232,5 @@ export class AuthService {
       expiresIn: ACCESS_TOKEN_EXPIRATION_SECONDS,
       tokenType: 'Bearer',
     };
-  }
+  } 
 }
