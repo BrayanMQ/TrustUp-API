@@ -54,6 +54,7 @@ export class AuthController {
     description: 'Nonce not found, expired, already used, invalid signature, or blocked account',
   })
   async verify(@Body() dto: VerifyRequestDto): Promise<AuthResponseDto> {
-    return this.authService.verifySignature(dto);
+    await this.authService.verifySignature(dto);
+    return this.authService.generateTokens(dto.wallet);
   }
 }

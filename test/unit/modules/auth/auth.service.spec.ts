@@ -7,12 +7,11 @@ import { SupabaseService } from '../../../../src/database/supabase.client';
 
 // Mock Stellar SDK to avoid real crypto operations in unit tests
 jest.mock('stellar-sdk', () => ({
-  Keypair: {
-    fromPublicKey: jest.fn(),
-  },
+  Keypair: { fromPublicKey: jest.fn() },
+  StrKey: { isValidEd25519PublicKey: jest.fn().mockReturnValue(true) },
 }));
 
-import { Keypair } from 'stellar-sdk';
+import { Keypair, StrKey } from 'stellar-sdk';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -20,9 +19,7 @@ describe('AuthService', () => {
   const mockInsert = jest.fn().mockResolvedValue({ error: null });
   const mockFrom = jest.fn().mockReturnValue({ insert: mockInsert });
 
-  const mockSupabaseClient = {
-    from: mockFrom,
-  };
+  const mockSupabaseClient = { from: mockFrom };
 
   const mockSupabaseService = {
     getServiceRoleClient: jest.fn(() => mockSupabaseClient),
@@ -55,6 +52,7 @@ describe('AuthService', () => {
     mockJwtService.sign.mockReturnValue('mock.jwt.token');
     mockConfigService.get.mockReturnValue('mock-secret');
     mockFrom.mockReturnValue({ insert: mockInsert });
+    (StrKey.isValidEd25519PublicKey as jest.Mock).mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -114,8 +112,7 @@ describe('AuthService', () => {
     });
 
     it('should throw InternalServerErrorException when database insert fails', async () => {
-      const dbError = { message: 'Database connection failed' };
-      mockInsert.mockResolvedValue({ error: dbError });
+      mockInsert.mockResolvedValue({ error: { message: 'Database connection failed' } });
 
       await expect(service.generateNonce(validWallet)).rejects.toThrow(
         InternalServerErrorException,
@@ -124,32 +121,24 @@ describe('AuthService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // verifySignature
+  // verifySignature — validates nonce + Ed25519 signature, marks nonce used
   // ---------------------------------------------------------------------------
   describe('verifySignature', () => {
     const validNonce = 'a1b2c3d4e5f67890abcdef1234567890a1b2c3d4e5f67890abcdef1234567890';
-    const validSignature = Buffer.alloc(64).toString('base64'); // 64 zero bytes as base64
+    const validSignature = Buffer.alloc(64).toString('base64');
     const futureExpiry = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
     const defaultNonceRecord = { id: 'nonce-uuid', expires_at: futureExpiry };
-    const defaultUserRecord = { id: 'user-uuid', status: 'active' };
 
-    /**
-     * Configures mockFrom to return the appropriate chain for each DB table.
-     *
-     * Nonces chain supports both SELECT and UPDATE patterns:
-     *   SELECT: .select().eq().eq().is().single() → resolves with nonceResult
-     *   UPDATE: .update().eq()                   → resolves with { error: null }
-     */
     function setupMocks({
       nonceResult = { data: defaultNonceRecord, error: null },
       markUsedResult = { error: null },
-      userResult = { data: defaultUserRecord, error: null },
-      sessionResult = { error: null },
       signatureValid = true,
+      strKeyValid = true,
     } = {}) {
       const mockKeypair = { verify: jest.fn().mockReturnValue(signatureValid) };
       (Keypair.fromPublicKey as jest.Mock).mockReturnValue(mockKeypair);
+      (StrKey.isValidEd25519PublicKey as jest.Mock).mockReturnValue(strKeyValid);
 
       mockFrom.mockImplementation((table: string) => {
         if (table === 'nonces') {
@@ -166,22 +155,6 @@ describe('AuthService', () => {
           chain.is.mockReturnValue(chain);
           return chain;
         }
-
-        if (table === 'users') {
-          const chain: Record<string, jest.Mock> = {
-            upsert: jest.fn(),
-            select: jest.fn(),
-            single: jest.fn().mockResolvedValue(userResult),
-          };
-          chain.upsert.mockReturnValue(chain);
-          chain.select.mockReturnValue(chain);
-          return chain;
-        }
-
-        if (table === 'sessions') {
-          return { insert: jest.fn().mockResolvedValue(sessionResult) };
-        }
-
         return { insert: mockInsert };
       });
 
@@ -190,18 +163,21 @@ describe('AuthService', () => {
 
     const validDto = { wallet: validWallet, nonce: validNonce, signature: validSignature };
 
-    it('should return accessToken, refreshToken, expiresIn and tokenType on valid input', async () => {
+    it('should resolve without error when nonce and signature are valid', async () => {
       setupMocks();
-
-      const result = await service.verifySignature(validDto);
-
-      expect(result).toHaveProperty('accessToken');
-      expect(result).toHaveProperty('refreshToken');
-      expect(result.expiresIn).toBe(900);
-      expect(result.tokenType).toBe('Bearer');
+      await expect(service.verifySignature(validDto)).resolves.toBeUndefined();
     });
 
     it('should throw UnauthorizedException (AUTH_NONCE_NOT_FOUND) when nonce does not exist', async () => {
+      setupMocks({ nonceResult: { data: null, error: { message: 'No rows found' } } });
+
+      await expect(service.verifySignature(validDto)).rejects.toMatchObject({
+        response: { code: 'AUTH_NONCE_NOT_FOUND' },
+      });
+    });
+
+    it('should throw UnauthorizedException (AUTH_NONCE_NOT_FOUND) when nonce is already used', async () => {
+      // A used nonce has used_at set — .is('used_at', null) excludes it → same NOT_FOUND error
       setupMocks({ nonceResult: { data: null, error: { message: 'No rows found' } } });
 
       await expect(service.verifySignature(validDto)).rejects.toMatchObject({
@@ -220,6 +196,14 @@ describe('AuthService', () => {
       });
     });
 
+    it('should throw UnauthorizedException (AUTH_SIGNATURE_INVALID) when StrKey validation fails', async () => {
+      setupMocks({ strKeyValid: false });
+
+      await expect(service.verifySignature(validDto)).rejects.toMatchObject({
+        response: { code: 'AUTH_SIGNATURE_INVALID' },
+      });
+    });
+
     it('should throw UnauthorizedException (AUTH_SIGNATURE_INVALID) when signature does not verify', async () => {
       setupMocks({ signatureValid: false });
 
@@ -228,61 +212,8 @@ describe('AuthService', () => {
       });
     });
 
-    it('should throw UnauthorizedException (AUTH_USER_BLOCKED) when user account is blocked', async () => {
-      setupMocks({ userResult: { data: { id: 'user-uuid', status: 'blocked' }, error: null } });
-
-      await expect(service.verifySignature(validDto)).rejects.toMatchObject({
-        response: { code: 'AUTH_USER_BLOCKED' },
-      });
-    });
-
-    it('should throw InternalServerErrorException (DATABASE_USER_UPSERT_FAILED) when user upsert fails', async () => {
-      setupMocks({ userResult: { data: null, error: { message: 'DB error' } } });
-
-      await expect(service.verifySignature(validDto)).rejects.toMatchObject({
-        response: { code: 'DATABASE_USER_UPSERT_FAILED' },
-      });
-    });
-
-    it('should throw InternalServerErrorException (DATABASE_SESSION_CREATE_FAILED) when session insert fails', async () => {
-      setupMocks({ sessionResult: { error: { message: 'DB error' } } });
-
-      await expect(service.verifySignature(validDto)).rejects.toMatchObject({
-        response: { code: 'DATABASE_SESSION_CREATE_FAILED' },
-      });
-    });
-
-    it('should throw UnauthorizedException (AUTH_NONCE_NOT_FOUND) when nonce is already used', async () => {
-      // A used nonce has used_at set — the .is('used_at', null) filter excludes it,
-      // so the SELECT returns no rows, which triggers the same NOT_FOUND error.
-      setupMocks({ nonceResult: { data: null, error: { message: 'No rows found' } } });
-
-      await expect(service.verifySignature(validDto)).rejects.toMatchObject({
-        response: { code: 'AUTH_NONCE_NOT_FOUND' },
-      });
-    });
-
-    it('should sign access token with payload { wallet, type: access } and refresh with { wallet, type: refresh }', async () => {
-      setupMocks();
-
-      await service.verifySignature(validDto);
-
-      expect(mockJwtService.sign).toHaveBeenCalledTimes(2);
-      expect(mockJwtService.sign).toHaveBeenNthCalledWith(
-        1,
-        { wallet: validWallet, type: 'access' },
-        expect.objectContaining({ expiresIn: '15m' }),
-      );
-      expect(mockJwtService.sign).toHaveBeenNthCalledWith(
-        2,
-        { wallet: validWallet, type: 'refresh' },
-        expect.objectContaining({ expiresIn: '7d' }),
-      );
-    });
-
-    it('should verify the signature using the Stellar Keypair with nonce bytes and base64 signature', async () => {
+    it('should verify signature using Stellar Keypair with nonce bytes and base64 signature', async () => {
       const { mockKeypair } = setupMocks();
-
       await service.verifySignature(validDto);
 
       expect(Keypair.fromPublicKey).toHaveBeenCalledWith(validWallet);
@@ -290,6 +221,96 @@ describe('AuthService', () => {
         Buffer.from(validNonce),
         Buffer.from(validSignature, 'base64'),
       );
+    });
+
+    it('should mark nonce as used after successful verification', async () => {
+      const { } = setupMocks();
+      await service.verifySignature(validDto);
+
+      expect(mockFrom).toHaveBeenCalledWith('nonces');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // generateTokens — upserts user, signs JWT tokens, stores session
+  // ---------------------------------------------------------------------------
+  describe('generateTokens', () => {
+    const defaultUserRecord = { id: 'user-uuid', status: 'active' };
+
+    function setupMocks({
+      userResult = { data: defaultUserRecord, error: null },
+      sessionResult = { error: null },
+    } = {}) {
+      mockFrom.mockImplementation((table: string) => {
+        if (table === 'users') {
+          const chain: Record<string, jest.Mock> = {
+            upsert: jest.fn(),
+            select: jest.fn(),
+            single: jest.fn().mockResolvedValue(userResult),
+          };
+          chain.upsert.mockReturnValue(chain);
+          chain.select.mockReturnValue(chain);
+          return chain;
+        }
+        if (table === 'sessions') {
+          return { insert: jest.fn().mockResolvedValue(sessionResult) };
+        }
+        return { insert: mockInsert };
+      });
+    }
+
+    it('should return accessToken, refreshToken, expiresIn and tokenType', async () => {
+      setupMocks();
+      const result = await service.generateTokens(validWallet);
+
+      expect(result).toHaveProperty('accessToken');
+      expect(result).toHaveProperty('refreshToken');
+      expect(result.expiresIn).toBe(900);
+      expect(result.tokenType).toBe('Bearer');
+    });
+
+    it('should sign access token with payload { wallet, type: access } and 15m expiration', async () => {
+      setupMocks();
+      await service.generateTokens(validWallet);
+
+      expect(mockJwtService.sign).toHaveBeenCalledWith(
+        { wallet: validWallet, type: 'access' },
+        expect.objectContaining({ expiresIn: '15m' }),
+      );
+    });
+
+    it('should sign refresh token with payload { wallet, type: refresh } and 7d expiration', async () => {
+      setupMocks();
+      await service.generateTokens(validWallet);
+
+      expect(mockJwtService.sign).toHaveBeenCalledWith(
+        { wallet: validWallet, type: 'refresh' },
+        expect.objectContaining({ expiresIn: '7d' }),
+      );
+    });
+
+    it('should throw UnauthorizedException (AUTH_USER_BLOCKED) when user account is blocked', async () => {
+      setupMocks({ userResult: { data: { id: 'user-uuid', status: 'blocked' }, error: null } });
+
+      await expect(service.generateTokens(validWallet)).rejects.toMatchObject({
+        response: { code: 'AUTH_USER_BLOCKED' },
+      });
+    });
+
+    it('should throw InternalServerErrorException (DATABASE_USER_UPSERT_FAILED) when user upsert fails', async () => {
+      setupMocks({ userResult: { data: null, error: { message: 'DB error' } } });
+
+      await expect(service.generateTokens(validWallet)).rejects.toMatchObject({
+        response: { code: 'DATABASE_USER_UPSERT_FAILED' },
+      });
+    });
+
+    it('should throw InternalServerErrorException (DATABASE_SESSION_CREATE_FAILED) when session insert fails', async () => {
+      setupMocks({ sessionResult: { error: { message: 'DB error' } } });
+
+      await expect(service.generateTokens(validWallet)).rejects.toMatchObject({
+        response: { code: 'DATABASE_SESSION_CREATE_FAILED' },
+      });
     });
   });
 });

@@ -6,7 +6,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes } from 'crypto';
-import { Keypair } from 'stellar-sdk';
+import { Keypair, StrKey } from 'stellar-sdk';
 import { SupabaseService } from '../../database/supabase.client';
 import { NonceResponseDto } from './dto/nonce-response.dto';
 import { VerifyRequestDto } from './dto/verify-request.dto';
@@ -62,20 +62,17 @@ export class AuthService {
   }
 
   /**
-   * Verifies a Stellar wallet signature against a previously issued nonce
-   * and issues JWT access and refresh tokens upon success.
+   * Verifies a Stellar wallet signature against a previously issued nonce.
+   * Validates that the nonce exists, has not expired, has not been used, and
+   * that the Ed25519 signature was produced by the wallet's private key.
+   * Marks the nonce as used on success to prevent replay attacks.
    *
-   * Flow:
-   * 1. Fetch and validate the nonce (exists, not expired, not used)
-   * 2. Verify the Ed25519 signature using the Stellar SDK
-   * 3. Mark nonce as used (prevents replay attacks)
-   * 4. Upsert user record and check account status
-   * 5. Generate and store JWT tokens via generateTokens()
+   * Throws UnauthorizedException on any validation or signature failure.
+   * Returns void — call generateTokens(wallet) afterwards to issue JWT tokens.
    *
    * @param dto - Wallet address, nonce, and base64-encoded signature
-   * @returns JWT access token, refresh token, expiration, and token type
    */
-  async verifySignature(dto: VerifyRequestDto): Promise<AuthResponseDto> {
+  async verifySignature(dto: VerifyRequestDto): Promise<void> {
     const client = this.supabaseService.getServiceRoleClient();
 
     // 1. Fetch nonce — must exist, not yet used, and belong to this wallet
@@ -103,6 +100,14 @@ export class AuthService {
     }
 
     // 3. Verify Ed25519 signature using Stellar SDK
+    // StrKey validates the public key format before passing to Keypair
+    if (!StrKey.isValidEd25519PublicKey(dto.wallet)) {
+      throw new UnauthorizedException({
+        code: 'AUTH_SIGNATURE_INVALID',
+        message: 'Invalid signature. Verification failed.',
+      });
+    }
+
     try {
       const keypair = Keypair.fromPublicKey(dto.wallet);
       const isValid = keypair.verify(
@@ -129,13 +134,24 @@ export class AuthService {
       .from('nonces')
       .update({ used_at: new Date().toISOString() })
       .eq('id', nonceRecord.id);
+  }
 
-    // 5. Upsert user — create on first auth, update last_seen_at on subsequent logins
-    const { data: user, error: userError } = await client
+  /**
+   * Upserts the user record for the given wallet (creates on first login, updates
+   * last_seen_at on subsequent logins) and returns the internal user ID.
+   * Throws UnauthorizedException if the account is blocked.
+   *
+   * @param wallet - Stellar wallet address
+   * @returns Internal user UUID
+   */
+  private async findOrCreateUser(wallet: string): Promise<string> {
+    const client = this.supabaseService.getServiceRoleClient();
+
+    const { data: user, error } = await client
       .from('users')
       .upsert(
         {
-          wallet_address: dto.wallet,
+          wallet_address: wallet,
           last_seen_at: new Date().toISOString(),
         },
         { onConflict: 'wallet_address' },
@@ -143,14 +159,13 @@ export class AuthService {
       .select('id, status')
       .single();
 
-    if (userError || !user) {
+    if (error || !user) {
       throw new InternalServerErrorException({
         code: 'DATABASE_USER_UPSERT_FAILED',
         message: 'Failed to create or update user record.',
       });
     }
 
-    // 6. Reject blocked accounts
     if (user.status === 'blocked') {
       throw new UnauthorizedException({
         code: 'AUTH_USER_BLOCKED',
@@ -158,22 +173,24 @@ export class AuthService {
       });
     }
 
-    // 7. Generate JWT tokens and persist session
-    return this.generateTokens(dto.wallet, user.id);
+    return user.id;
   }
 
   /**
    * Generates a signed JWT access token and refresh token for the given wallet,
    * hashes the refresh token with SHA-256, and persists the session in the database.
    *
-   * Payload format: `{ wallet, type: 'access' | 'refresh', iat, exp }`
+   * Access token payload:  `{ wallet, type: 'access', iat, exp }`
+   * Refresh token payload: `{ wallet, type: 'refresh', iat, exp }`
    * Refresh token hash: SHA-256 hex digest (per sessions table schema)
    *
-   * @param wallet - Stellar wallet address (used as the identity claim)
-   * @param userId  - Internal user UUID (FK for sessions table)
+   * Call verifySignature(dto) before this method to authenticate the wallet.
+   *
+   * @param wallet - Stellar wallet address (identity claim in JWT payload)
    * @returns Signed access token, refresh token, expiration, and token type
    */
-  private async generateTokens(wallet: string, userId: string): Promise<AuthResponseDto> {
+  async generateTokens(wallet: string): Promise<AuthResponseDto> {
+    const userId = await this.findOrCreateUser(wallet);
     const client = this.supabaseService.getServiceRoleClient();
 
     const accessToken = this.jwtService.sign(
