@@ -252,7 +252,17 @@ describe('AuthService', () => {
       });
     });
 
-    it('should sign access token and refresh token with correct options', async () => {
+    it('should throw UnauthorizedException (AUTH_NONCE_NOT_FOUND) when nonce is already used', async () => {
+      // A used nonce has used_at set — the .is('used_at', null) filter excludes it,
+      // so the SELECT returns no rows, which triggers the same NOT_FOUND error.
+      setupMocks({ nonceResult: { data: null, error: { message: 'No rows found' } } });
+
+      await expect(service.verifySignature(validDto)).rejects.toMatchObject({
+        response: { code: 'AUTH_NONCE_NOT_FOUND' },
+      });
+    });
+
+    it('should sign access token with payload { wallet, type: access } and refresh with { wallet, type: refresh }', async () => {
       setupMocks();
 
       await service.verifySignature(validDto);
@@ -260,12 +270,12 @@ describe('AuthService', () => {
       expect(mockJwtService.sign).toHaveBeenCalledTimes(2);
       expect(mockJwtService.sign).toHaveBeenNthCalledWith(
         1,
-        { sub: validWallet },
-        expect.objectContaining({ expiresIn: '900s' }),
+        { wallet: validWallet, type: 'access' },
+        expect.objectContaining({ expiresIn: '15m' }),
       );
       expect(mockJwtService.sign).toHaveBeenNthCalledWith(
         2,
-        { sub: validWallet },
+        { wallet: validWallet, type: 'refresh' },
         expect.objectContaining({ expiresIn: '7d' }),
       );
     });

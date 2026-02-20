@@ -11,15 +11,15 @@ import { SupabaseService } from '../../database/supabase.client';
 import { NonceResponseDto } from './dto/nonce-response.dto';
 import { VerifyRequestDto } from './dto/verify-request.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
+import {
+  ACCESS_TOKEN_EXPIRATION,
+  ACCESS_TOKEN_EXPIRATION_SECONDS,
+  REFRESH_TOKEN_EXPIRATION,
+  REFRESH_TOKEN_EXPIRATION_MS,
+} from '../../config/jwt.config';
 
 /** Nonce expiration time in seconds (5 minutes) */
 const NONCE_EXPIRATION_SECONDS = 300;
-
-/** Access token expiration in seconds (15 minutes) */
-const ACCESS_TOKEN_EXPIRATION_SECONDS = 900;
-
-/** Refresh token expiration in days (7 days) */
-const REFRESH_TOKEN_EXPIRATION_DAYS = 7;
 
 @Injectable()
 export class AuthService {
@@ -70,7 +70,7 @@ export class AuthService {
    * 2. Verify the Ed25519 signature using the Stellar SDK
    * 3. Mark nonce as used (prevents replay attacks)
    * 4. Upsert user record and check account status
-   * 5. Generate and store JWT tokens
+   * 5. Generate and store JWT tokens via generateTokens()
    *
    * @param dto - Wallet address, nonce, and base64-encoded signature
    * @returns JWT access token, refresh token, expiration, and token type
@@ -158,29 +158,46 @@ export class AuthService {
       });
     }
 
-    // 7. Generate JWT tokens
-    const payload = { sub: dto.wallet };
+    // 7. Generate JWT tokens and persist session
+    return this.generateTokens(dto.wallet, user.id);
+  }
 
-    const accessToken = this.jwtService.sign(payload, {
-      secret: this.configService.get<string>('JWT_SECRET'),
-      expiresIn: `${ACCESS_TOKEN_EXPIRATION_SECONDS}s`,
-    });
+  /**
+   * Generates a signed JWT access token and refresh token for the given wallet,
+   * hashes the refresh token with SHA-256, and persists the session in the database.
+   *
+   * Payload format: `{ wallet, type: 'access' | 'refresh', iat, exp }`
+   * Refresh token hash: SHA-256 hex digest (per sessions table schema)
+   *
+   * @param wallet - Stellar wallet address (used as the identity claim)
+   * @param userId  - Internal user UUID (FK for sessions table)
+   * @returns Signed access token, refresh token, expiration, and token type
+   */
+  private async generateTokens(wallet: string, userId: string): Promise<AuthResponseDto> {
+    const client = this.supabaseService.getServiceRoleClient();
 
-    const refreshToken = this.jwtService.sign(payload, {
-      secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-      expiresIn: `${REFRESH_TOKEN_EXPIRATION_DAYS}d`,
-    });
-
-    // 8. Hash refresh token with SHA-256 before storage (per sessions table schema)
-    const refreshTokenHash = createHash('sha256').update(refreshToken).digest('hex');
-
-    const refreshExpiresAt = new Date(
-      Date.now() + REFRESH_TOKEN_EXPIRATION_DAYS * 24 * 60 * 60 * 1000,
+    const accessToken = this.jwtService.sign(
+      { wallet, type: 'access' },
+      {
+        secret: this.configService.get<string>('JWT_SECRET'),
+        expiresIn: ACCESS_TOKEN_EXPIRATION,
+      },
     );
 
-    // 9. Store session with hashed refresh token
+    const refreshToken = this.jwtService.sign(
+      { wallet, type: 'refresh' },
+      {
+        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+        expiresIn: REFRESH_TOKEN_EXPIRATION,
+      },
+    );
+
+    // Hash refresh token with SHA-256 before storage (per sessions table schema)
+    const refreshTokenHash = createHash('sha256').update(refreshToken).digest('hex');
+    const refreshExpiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRATION_MS);
+
     const { error: sessionError } = await client.from('sessions').insert({
-      user_id: user.id,
+      user_id: userId,
       refresh_token_hash: refreshTokenHash,
       expires_at: refreshExpiresAt.toISOString(),
     });
