@@ -4,9 +4,11 @@ import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
+import { UsersModule } from './modules/users/users.module';
 
 @Module({
   imports: [
+    // ConfigModule must be first — SupabaseService and other providers depend on it
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRoot([
       {
@@ -16,7 +18,9 @@ import { HealthModule } from './modules/health/health.module';
     ]),
     AuthModule,
     HealthModule,
+    UsersModule,
   ],
+  controllers: [],
   providers: [
     {
       provide: APP_GUARD,
@@ -24,5 +28,6 @@ import { HealthModule } from './modules/health/health.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
+
 
