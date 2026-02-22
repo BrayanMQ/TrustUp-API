@@ -3,6 +3,7 @@ import {
   Get,
   Param,
   BadRequestException,
+  UnauthorizedException,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -36,7 +37,7 @@ export class ReputationController {
     // Once the JwtAuthGuard and @CurrentUser() decorator are implemented,
     // this endpoint will extract the wallet from the JWT payload.
     // For now, return a clear 401-style error so consumers know auth is required.
-    throw new BadRequestException({
+    throw new UnauthorizedException({
       code: 'AUTH_NOT_IMPLEMENTED',
       message:
         'Authentication guard is not yet available. Use GET /reputation/:wallet instead.',

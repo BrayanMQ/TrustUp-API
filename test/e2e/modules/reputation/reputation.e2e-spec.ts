@@ -133,14 +133,14 @@ describe('ReputationController (e2e)', () => {
   // GET /reputation/me
   // ---------------------------------------------------------------------------
   describe('GET /reputation/me', () => {
-    it('should return 400 since auth guard is not yet implemented', async () => {
+    it('should return 401 since auth guard is not yet implemented', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/reputation/me',
       });
 
-      // Returns 400 because auth guard (API-03) is not wired yet
-      expect(res.statusCode).toBe(400);
+      // Returns 401 because auth guard (API-03) is not wired yet
+      expect(res.statusCode).toBe(401);
     });
   });
 });

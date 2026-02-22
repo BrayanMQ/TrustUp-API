@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { ReputationController } from '../../../../src/modules/reputation/reputation.controller';
 import { ReputationService } from '../../../../src/modules/reputation/reputation.service';
 
@@ -99,9 +99,9 @@ describe('ReputationController', () => {
   // GET /reputation/me
   // ---------------------------------------------------------------------------
   describe('getMyReputation', () => {
-    it('should throw BadRequestException since auth guard is not yet wired', async () => {
+    it('should throw UnauthorizedException since auth guard is not yet wired', async () => {
       await expect(controller.getMyReputation()).rejects.toThrow(
-        BadRequestException,
+        UnauthorizedException,
       );
     });
   });
