@@ -113,11 +113,11 @@ export class ReputationService implements OnModuleInit {
             maxCredit = 3000;
         } else if (score >= 60) {
             tier = 'bronze';
-            interestRate = 12;
+            interestRate = 9;
             maxCredit = 1500;
         } else {
             tier = 'poor';
-            interestRate = 18;
+            interestRate = 12;
             maxCredit = 500;
         }
 
