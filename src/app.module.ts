@@ -7,6 +7,7 @@ import { HealthModule } from './modules/health/health.module';
 import { LoansModule } from './modules/loans/loans.module';
 import { ReputationModule } from './modules/reputation/reputation.module';
 import { UsersModule } from './modules/users/users.module';
+import { MerchantsModule } from './modules/merchants/merchants.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { UsersModule } from './modules/users/users.module';
     LoansModule,
     ReputationModule,
     UsersModule,
+    MerchantsModule,
   ],
   controllers: [],
   providers: [
