@@ -6,6 +6,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { ReputationModule } from './modules/reputation/reputation.module';
 import { UsersModule } from './modules/users/users.module';
+import { MerchantsModule } from './modules/merchants/merchants.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { UsersModule } from './modules/users/users.module';
     HealthModule,
     ReputationModule,
     UsersModule,
+    MerchantsModule,
   ],
   controllers: [],
   providers: [
