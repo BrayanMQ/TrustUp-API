@@ -1,14 +1,21 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
-import { ReputationController } from './reputation.controller';
+import { CacheModule } from '@nestjs/cache-manager';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ReputationService } from './reputation.service';
-import { SorobanService } from '../../blockchain/soroban/soroban.service';
-import { ReputationContractClient } from '../../blockchain/contracts/reputation-contract.client';
+import { ReputationController } from './reputation.controller';
+import { getRedisConfig } from '../../config/redis.config';
+import { SupabaseService } from '../../database/supabase.client';
 
 @Module({
-  imports: [ConfigModule],
-  controllers: [ReputationController],
-  providers: [ReputationService, SorobanService, ReputationContractClient],
-  exports: [ReputationService],
+    imports: [
+        CacheModule.registerAsync({
+            imports: [ConfigModule],
+            inject: [ConfigService],
+            useFactory: getRedisConfig,
+        }),
+    ],
+    providers: [ReputationService, SupabaseService],
+    controllers: [ReputationController],
+    exports: [ReputationService],
 })
-export class ReputationModule {}
+export class ReputationModule { }
