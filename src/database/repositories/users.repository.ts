@@ -1,5 +1,6 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { SupabaseService } from '../supabase.client';
+import { UpdateUserDto } from '../../modules/users/dto/update-user.dto';
 
 export interface UserPreferencesRecord {
     notifications_enabled: boolean;
@@ -105,6 +106,59 @@ export class UsersRepository {
             });
         }
         return data as UserPreferencesRecord;
+    }
 
+    /**
+     * Updates the user's profile fields and/or preferences.
+     * Uses upsert so the row is created if it doesn't exist yet.
+     * `updated_at` is maintained automatically by the DB trigger.
+     *
+     * @param wallet - Stellar wallet address (from JWT via JwtAuthGuard)
+     * @param data   - Validated and sanitized update payload (API-05)
+     */
+    async update(
+        wallet: string,
+        data: UpdateUserDto,
+    ): Promise<{ wallet_address: string; display_name: string | null; avatar_url: string | null; updated_at: string; id: string }> {
+        const client = this.supabaseService.getServiceRoleClient();
+
+        // Build the users table payload — only include provided fields
+        const userPayload: Record<string, unknown> = { wallet_address: wallet };
+        if (data.name !== undefined) userPayload.display_name = data.name;
+        if (data.avatar !== undefined) userPayload.avatar_url = data.avatar;
+
+        const { data: user, error: userError } = await client
+            .from('users')
+            .upsert(userPayload, { onConflict: 'wallet_address' })
+            .select('id, wallet_address, display_name, avatar_url, updated_at')
+            .single();
+
+        if (userError || !user) {
+            throw new InternalServerErrorException({
+                code: 'DATABASE_USER_UPDATE_FAILED',
+                message: 'Failed to update user profile.',
+            });
+        }
+
+        // Update preferences if provided
+        if (data.preferences !== undefined) {
+            const prefPayload: Record<string, unknown> = { user_id: user.id };
+            if (data.preferences.notifications !== undefined) prefPayload.notifications_enabled = data.preferences.notifications;
+            if (data.preferences.theme !== undefined) prefPayload.theme = data.preferences.theme;
+            if (data.preferences.language !== undefined) prefPayload.language = data.preferences.language;
+
+            const { error: prefError } = await client
+                .from('user_preferences')
+                .upsert(prefPayload, { onConflict: 'user_id' });
+
+            if (prefError) {
+                throw new InternalServerErrorException({
+                    code: 'DATABASE_PREFERENCES_UPDATE_FAILED',
+                    message: 'Failed to update user preferences.',
+                });
+            }
+        }
+
+        return user as { wallet_address: string; display_name: string | null; avatar_url: string | null; updated_at: string; id: string };
     }
 }
