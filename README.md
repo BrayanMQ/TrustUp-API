@@ -316,10 +316,10 @@ This project is licensed under the MIT License - see the [LICENSE](./LICENSE) fi
 </td>
 
 <td align="center">
-  <a href="https://github.com/DiegoERS">
-    <img src="https://avatars.githubusercontent.com/u/116531524?v=4" width="100px;" style="border-radius:50%;" alt="DiegoERS"/><br />
-    <sub><b>🥉 @DiegoERS</b></sub><br />
-    <sub>9 contributions</sub>
+  <a href="https://github.com/actions-user">
+    <img src="https://avatars.githubusercontent.com/u/65916846?v=4" width="100px;" style="border-radius:50%;" alt="actions-user"/><br />
+    <sub><b>🥉 @actions-user</b></sub><br />
+    <sub>10 contributions</sub>
   </a>
 </td>
 
