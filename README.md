@@ -308,17 +308,17 @@ This project is licensed under the MIT License - see the [LICENSE](./LICENSE) fi
 </td>
 
 <td align="center">
-  <a href="https://github.com/Jopsan-gm">
-    <img src="https://avatars.githubusercontent.com/u/228767027?v=4" width="100px;" style="border-radius:50%;" alt="Jopsan-gm"/><br />
-    <sub><b>🥈 @Jopsan-gm</b></sub><br />
-    <sub>13 contributions</sub>
+  <a href="https://github.com/actions-user">
+    <img src="https://avatars.githubusercontent.com/u/65916846?v=4" width="100px;" style="border-radius:50%;" alt="actions-user"/><br />
+    <sub><b>🥈 @actions-user</b></sub><br />
+    <sub>14 contributions</sub>
   </a>
 </td>
 
 <td align="center">
-  <a href="https://github.com/actions-user">
-    <img src="https://avatars.githubusercontent.com/u/65916846?v=4" width="100px;" style="border-radius:50%;" alt="actions-user"/><br />
-    <sub><b>🥉 @actions-user</b></sub><br />
+  <a href="https://github.com/Jopsan-gm">
+    <img src="https://avatars.githubusercontent.com/u/228767027?v=4" width="100px;" style="border-radius:50%;" alt="Jopsan-gm"/><br />
+    <sub><b>🥉 @Jopsan-gm</b></sub><br />
     <sub>13 contributions</sub>
   </a>
 </td>
